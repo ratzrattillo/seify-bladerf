@@ -171,6 +171,16 @@ pub const BLADERF_FREQUENCY_MIN: u32 = 237500000;
 pub const BLADERF_FREQUENCY_MAX: u32 = 3800000000;
 
 /**
+ * Maximum output frequency on SMB connector, if no expansion board attached.
+ */
+pub const BLADERF_SMB_FREQUENCY_MAX: u32 =  200000000;
+
+/**
+ * Minimum output frequency on SMB connector, if no expansion board attached.
+ */
+pub const BLADERF_SMB_FREQUENCY_MIN: u32 =  (38400000 * 66) / (32 * 567);
+
+/**
  * LNA gain options
  *
  * \deprecated Use bladerf_get_gain_stage_range()

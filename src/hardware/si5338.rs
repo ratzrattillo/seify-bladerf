@@ -1,4 +1,6 @@
+use anyhow::anyhow;
 use crate::bladerf::BladerfRationalRate;
+use crate::board::bladerf1::{BLADERF_SAMPLERATE_MIN, BLADERF_SMB_FREQUENCY_MAX, BLADERF_SMB_FREQUENCY_MIN};
 use crate::nios::constants::{NIOS_PKT_8X8_TARGET_SI5338, NIOS_PKT_FLAG_READ, NIOS_PKT_FLAG_WRITE};
 use crate::nios::packet8x8::NiosPacket8x8;
 use crate::nios::Nios;
@@ -201,13 +203,16 @@ impl SI5338 {
         ms.p3 = 0;
 
         /* Populate */
-        ms.p1 = (((ms.regs[2] as u32) & 3) << 16) | ((ms.regs[1] as u32) << 8) | (ms.regs[0] as u32);
+        ms.p1 =
+            (((ms.regs[2] as u32) & 3) << 16) | ((ms.regs[1] as u32) << 8) | (ms.regs[0] as u32);
         ms.p2 = ((ms.regs[5] as u32) << 22)
             | ((ms.regs[4] as u32) << 14)
             | ((ms.regs[3] as u32) << 6)
             | ((ms.regs[2] as u32 >> 2) & 0x3f);
-        ms.p3 =
-            (((ms.regs[9] as u32) & 0x3f) << 24) | ((ms.regs[8] as u32) << 16) | ((ms.regs[7] as u32) << 8) | (ms.regs[6] as u32);
+        ms.p3 = (((ms.regs[9] as u32) & 0x3f) << 24)
+            | ((ms.regs[8] as u32) << 16)
+            | ((ms.regs[7] as u32) << 8)
+            | (ms.regs[6] as u32);
 
         // log_verbose("Unpacked P1: 0x%8.8x (%u) P2: 0x%8.8x (%u) P3: 0x%8.8x (%u)\n", ms->p1, ms->p1, ms->p2, ms->p2, ms->p3, ms->p3);
 
@@ -234,11 +239,6 @@ impl SI5338 {
     pub fn read_multisynth(&self, ms: &mut Si5338Multisynth) -> anyhow::Result<()> {
         /* Read the enable bits */
         let mut val = self.read(36 + ms.index)?;
-        // status = dev->backend->si5338_read(dev, 36 + ms->index, &val);
-        // if (status < 0) {
-        //     si5338_log_read_error(status, bladerf_strerror(status));
-        //     return status ;
-        // }
 
         ms.enable = val & 7;
         // log_verbose("Read enable register: 0x%2.2x\n", val);
@@ -247,22 +247,9 @@ impl SI5338 {
         for i in 0..ms.regs.len() {
             ms.regs[i] = self.read(ms.base as u8 + i as u8)?
         }
-        // for (i = 0; i < 10; i++) {
-        //     status = dev->backend->si5338_read(dev, ms->base + i, ms.regs+i);
-        //     if (status < 0) {
-        //         si5338_log_read_error(status, bladerf_strerror(status));
-        //         return status;
-        //     }
-        //     log_verbose("Read regs[%d]: 0x%2.2x\n", i, *(ms.regs+i));
-        // }
 
         /* Populate the RxDIV value from the register */
         val = self.read(31 + ms.index)?;
-        // status = dev->backend->si5338_read(dev, 31 + ms->index, &val);
-        // if (status < 0) {
-        //     si5338_log_read_error(status, bladerf_strerror(status));
-        //     return status;
-        // }
 
         /* RxDIV is stored as a power of 2, so restore it on readback */
         // log_verbose("Read r register: 0x%2.2x\n", val);
@@ -282,13 +269,9 @@ impl SI5338 {
         self.write(36 + ms.index, val)?;
 
         /* Write out the registers */
-        // for idx in 0..10u8 {
-        //     self.write((ms.base + idx as u16) as u8, ms.regs[idx])?;
-        //     println!("Wrote regs[{}]: {}", idx, ms.regs[idx]);
-        // }
-        for (idx, reg_val) in ms.regs.iter().enumerate() {
-            self.write((ms.base + idx as u16) as u8, *reg_val)?;
-            println!("Wrote regs[{}]: {}", idx, *reg_val);
+        for i in 0..ms.regs.len() {
+            self.write((ms.base + i as u16) as u8, ms.regs[i])?;
+            println!("Wrote regs[{}]: {}", i, ms.regs[i]);
         }
 
         /* Calculate r_power from c_count */
@@ -306,7 +289,6 @@ impl SI5338 {
         println!("Wrote r register: {:x}", val);
 
         Ok(self.write(ms.index + 31, val)?)
-        //Ok(ms)
     }
 
     pub fn calculate_multisynth(ms: &mut Si5338Multisynth, rate: &BladerfRationalRate) {
@@ -334,12 +316,6 @@ impl SI5338 {
         }
 
         assert!(!(r_value == 32 && req.integer < 5000000));
-        // if r_value == 32 && req.integer < 5000000 {
-        //     // log_debug("Sample rate requires r > 32\n");
-        //     return BLADERF_ERR_INVAL;
-        // } else {
-        //     // log_verbose("Found r value of: %d\n", r_value);
-        // }
 
         /* Find suitable MS (a, b, c) values */
         let mut abc = BladerfRationalRate {
@@ -352,8 +328,8 @@ impl SI5338 {
         // log_verbose("MSx a + b/c: %"PRIu64" + %"PRIu64"/%"PRIu64"\n", abc.integer, abc.num, abc.den);
 
         /* Check values to make sure they are OK */
-        assert!(!(abc.integer < 8));
-        assert!(!(abc.integer > 567));
+        assert!(abc.integer > 7);
+        assert!(abc.integer < 568);
         // if abc.integer < 8 {
         //     //log_debug("Integer portion too small: %"PRIu64"\n", abc.integer);
         //     return BLADERF_ERR_INVAL;
@@ -365,8 +341,8 @@ impl SI5338 {
         /* Loss of precision if num or den are greater than 2^30-1 */
         while abc.num > (1 << 30) || abc.den > (1 << 30) {
             // log_debug("Loss of precision in reducing fraction from %"PRIu64"/%"PRIu64" to %"PRIu64"/%"PRIu64"\n", abc.num, abc.den, abc.num>>1, abc.den>>1);
-            abc.num = abc.num >> 1;
-            abc.den = abc.den >> 1;
+            abc.num >>= 1;
+            abc.den >>= 1;
         }
 
         // log_verbose("MSx a + b/c: %"PRIu64" + %"PRIu64"/%"PRIu64"\n", abc.integer, abc.num, abc.den);
@@ -435,12 +411,7 @@ impl SI5338 {
 
         /* Enforce minimum sample rate */
         Self::rational_reduce(&mut rate_reduced);
-        assert!(!(rate_reduced.integer < crate::board::bladerf1::BLADERF_SAMPLERATE_MIN));
-
-        // if (rate_reduced.integer < BLADERF_SAMPLERATE_MIN) {
-        //     // log_debug("%s: provided sample rate violates minimum\n", __FUNCTION__);
-        //     return BLADERF_ERR_INVAL;
-        // }
+        assert!(rate_reduced.integer >= BLADERF_SAMPLERATE_MIN);
 
         if ch == bladerf_channel_tx!(0) {
             channel |= SI5338_EN_B;
@@ -469,5 +440,95 @@ impl SI5338 {
 
         Ok(act.integer as u32)
         //log_verbose("Set actual integer sample rate: %d\n", act.integer);
+    }
+
+    pub fn get_rational_sample_rate(&self, ch: u8) -> anyhow::Result<BladerfRationalRate> {
+        let mut ms = Si5338Multisynth::default();
+
+        /* Select the multisynth we want to read */
+        ms.index = if ch == bladerf_channel_rx!(0) { 1 } else { 2 };
+
+        /* Update the base address */
+        Self::update_base(&mut ms);
+
+        /* Readback */
+        self.read_multisynth(&mut ms)?;
+
+        let mut rate = BladerfRationalRate::default();
+        Self::calculate_ms_freq(&mut ms, &mut rate);
+        Ok(rate)
+    }
+
+    pub fn get_sample_rate(&self, ch: u8) -> anyhow::Result<u32> {
+        let actual = self.get_rational_sample_rate(ch)?;
+
+        if actual.num != 0 {
+            println!("Fractional sample rate truncated during integer sample rate retrieval");
+        }
+
+        assert!(actual.integer <= u32::MAX as u64);
+        Ok(actual.integer as u32)
+    }
+
+    pub fn set_rational_smb_freq(&self, rate: &BladerfRationalRate) -> anyhow::Result<BladerfRationalRate> {
+        let mut rate_reduced = rate.clone();
+
+        /* Enforce minimum and maximum frequencies */
+        Self::rational_reduce(&mut rate_reduced);
+
+        if rate_reduced.integer < BLADERF_SMB_FREQUENCY_MIN as u64 {
+            return Err(anyhow!("provided SMB freq violates minimum"))
+        } else if rate_reduced.integer > BLADERF_SMB_FREQUENCY_MAX as u64 {
+            return Err(anyhow!("provided SMB freq violates maximum"))
+        }
+
+        Ok(self.set_rational_multisynth(3, SI5338_EN_A, rate_reduced)?)
+    }
+
+    pub fn set_smb_freq(&self, rate: u32)-> anyhow::Result<u32> {
+        let mut req = BladerfRationalRate::default();
+        println!("Setting integer SMB frequency: {}", rate);
+        req.integer = rate as u64;
+        req.num = 0;
+        req.den = 1;
+
+        let act = self.set_rational_smb_freq(&req)?;
+
+        if act.num != 0 {
+            println!("Non-integer SMB frequency set from integer frequency, truncating output.");
+        }
+
+        assert!(act.integer <= u32::MAX as u64);
+
+        println!("Set actual integer SMB frequency: {}", act.integer);
+
+        Ok(act.integer as u32)
+    }
+
+    pub fn get_rational_smb_freq(&self) -> anyhow::Result<BladerfRationalRate> {
+        let mut ms = Si5338Multisynth::default();
+        let mut rate = BladerfRationalRate::default();
+
+        /* Select MS3 for the SMB output */
+        ms.index = 3;
+        Self::update_base(&mut ms);
+
+        self.read_multisynth(&mut ms)?;
+
+        Self::calculate_ms_freq(&mut ms, &mut rate);
+
+        Ok(rate)
+    }
+
+    pub fn get_smb_freq(&self) -> anyhow::Result<u32> {
+        let actual = self.get_rational_smb_freq()?;
+
+        if actual.num != 0 {
+            println!("Fractional SMB frequency truncated during integer SMB frequency retrieval");
+        }
+
+        assert!(actual.integer <= u32::MAX as u64);
+
+        Ok(actual.integer as u32)
     }
 }
